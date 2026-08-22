@@ -23,6 +23,7 @@ import { PermissionsModule } from './permissions/permissions.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { CredentialEventsModule } from './credentials/credential-events.module';
 import { HealthAuthorityModule } from './health-authority/health-authority.module';
+import { CredentialSharingHistoryModule } from './credential-sharing-history/credential-sharing-history.module';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { HealthAuthorityModule } from './health-authority/health-authority.modul
     CredentialsModule,
     CredentialEventsModule,
     HealthAuthorityModule,
+    CredentialSharingHistoryModule,
   ],
   providers: [
     {
