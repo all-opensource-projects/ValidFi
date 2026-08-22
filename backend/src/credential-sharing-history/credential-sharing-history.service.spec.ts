@@ -4,7 +4,7 @@ import { CredentialSharingHistoryService } from './credential-sharing-history.se
 import { SharingHistoryEvent, SharingAction } from './sharing-history-event.entity';
 
 describe('CredentialSharingHistoryService', () => {
-  let service: CredentialSharingHistoryService;
+  let service;
 
   const mockRepository = {
     create: jest.fn().mockImplementation((dto) => dto),
