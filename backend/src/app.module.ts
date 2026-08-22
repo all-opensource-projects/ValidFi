@@ -20,10 +20,12 @@ import { AuditModule } from './audit/audit.module';
 import { BackupModule } from './backup/backup.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { PermissionsModule } from './permissions/permissions.module';
+import { CredentialVersioningModule } from './credential-versioning/credential-versioning.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { CredentialEventsModule } from './credentials/credential-events.module';
 import { HealthAuthorityModule } from './health-authority/health-authority.module';
 import { CredentialSharingHistoryModule } from './credential-sharing-history/credential-sharing-history.module';
+import { CredentialExportModule } from './credential-export/credential-export.module';
 
 @Module({
   imports: [
@@ -81,10 +83,12 @@ import { CredentialSharingHistoryModule } from './credential-sharing-history/cre
     BackupModule,
     AnalyticsModule,
     PermissionsModule,
+    CredentialVersioningModule,
     CredentialsModule,
     CredentialEventsModule,
     HealthAuthorityModule,
     CredentialSharingHistoryModule,
+    CredentialExportModule,
   ],
   providers: [
     {

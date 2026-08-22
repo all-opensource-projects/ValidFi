@@ -7,6 +7,7 @@ import { IpfsService } from '../ipfs/ipfs.service';
 import { CreateIdentityDto } from './dto/create-identity.dto';
 import { UpdateIdentityDto } from './dto/update-identity.dto';
 import { PaginateIdentityDto } from './dto/paginate-identity.dto';
+import { CredentialVersioningService } from '../credential-versioning/credential-versioning.service';
 
 export interface PaginatedResult<T> {
   data: T[];
@@ -20,13 +21,28 @@ export class IdentityService {
   constructor(
     @InjectRepository(Identity)
     private readonly identityRepository: Repository<Identity>,
+    private readonly versioningService: CredentialVersioningService,
     private readonly aiService: AiService,
     private readonly ipfsService: IpfsService,
   ) {}
 
   async create(createIdentityDto: CreateIdentityDto): Promise<Identity> {
     const identity = this.identityRepository.create(createIdentityDto);
-    return await this.identityRepository.save(identity);
+    const saved = await this.identityRepository.save(identity);
+
+    // Snapshot the initial version (v1) immediately after creation.
+    await this.versioningService.snapshotVersion({
+      credentialId: saved.id,
+      documentHash: saved.documentHash,
+      ipfsCid: saved.ipfsCid,
+      verificationStatus: saved.verificationStatus,
+      revoked: saved.revoked,
+      metadata: saved.metadata,
+      changedBy: saved.walletAddress,
+      changeReason: 'initial',
+    });
+
+    return saved;
   }
 
   async findAll(
@@ -62,14 +78,42 @@ export class IdentityService {
   async update(id: string, updateIdentityDto: UpdateIdentityDto): Promise<Identity> {
     const identity = await this.findOne(id);
     Object.assign(identity, updateIdentityDto);
-    return await this.identityRepository.save(identity);
+    const saved = await this.identityRepository.save(identity);
+
+    // Snapshot a new version on every update so the full change history is preserved.
+    await this.versioningService.snapshotVersion({
+      credentialId: saved.id,
+      documentHash: saved.documentHash,
+      ipfsCid: saved.ipfsCid,
+      verificationStatus: saved.verificationStatus,
+      revoked: saved.revoked,
+      metadata: saved.metadata,
+      changedBy: saved.walletAddress,
+      changeReason: 'update',
+    });
+
+    return saved;
   }
 
   async revoke(id: string, reason?: string): Promise<Identity> {
     const identity = await this.findOne(id);
     identity.revoked = true;
     if (reason) identity.revocationReason = reason;
-    return await this.identityRepository.save(identity);
+    const saved = await this.identityRepository.save(identity);
+
+    // Snapshot the revocation so history captures the exact moment of revocation.
+    await this.versioningService.snapshotVersion({
+      credentialId: saved.id,
+      documentHash: saved.documentHash,
+      ipfsCid: saved.ipfsCid,
+      verificationStatus: saved.verificationStatus,
+      revoked: true,
+      metadata: saved.metadata,
+      changedBy: saved.walletAddress,
+      changeReason: 'revoked',
+    });
+
+    return saved;
   }
 
   async bulkRevoke(ids: string[], reason?: string): Promise<Identity[]> {
