@@ -1,0 +1,102 @@
+# CodeRabbit AI Code Review Configuration
+# https://docs.coderabbit.ai/getting-started/configure-coderabbit
+
+language: en-US
+reviews:
+  # Automatically review every PR
+  auto_review:
+    enabled: true
+    # Only review PRs targeting main
+    base_branches:
+      - main
+    # Ignore drafts until they're marked ready
+    drafts: false
+    # Incremental reviews: only re-review changed files on push
+    incremental: true
+
+  # Review profile: assertive catches more issues
+  profile: assertive
+
+  # What to focus on in reviews
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+
+  # Path-specific review instructions
+  path_instructions:
+    - path: "contracts/**"
+      instructions: |
+        This is a Soroban smart contract (Rust) for the Stellar blockchain.
+        Focus on:
+        - Security vulnerabilities (reentrancy, overflow, unauthorized access)
+        - Storage efficiency (Soroban storage is metered)
+        - Error handling completeness (all error variants should be meaningful)
+        - Test coverage for new functionality
+        - Gas optimization
+        - Compliance with Soroban SDK best practices
+        Reject changes that introduce `unwrap()` or `expect()` in non-test code.
+
+    - path: "backend/**"
+      instructions: |
+        This is a NestJS backend (TypeScript) for a health credential platform.
+        Focus on:
+        - SQL injection prevention (TypeORM parameterized queries)
+        - Authentication/authorization bypass
+        - Input validation (class-validator decorators on all DTOs)
+        - Error handling (no internal details leaked to clients)
+        - Sensitive data exposure in logs or responses
+        - Proper use of NestJS guards, interceptors, and pipes
+        Reject changes with `@ts-ignore`, `any` types, or missing validation.
+
+    - path: "frontend/**"
+      instructions: |
+        This is a Next.js 15 frontend (TypeScript) with App Router.
+        Focus on:
+        - XSS prevention (no dangerouslySetInnerHTML without sanitization)
+        - Accessibility (ARIA labels, keyboard navigation, screen reader support)
+        - Performance (no unnecessary re-renders, proper memoization)
+        - Error boundaries and loading states
+        - Responsive design (mobile-first with Tailwind)
+        - Proper TypeScript types (no `any`)
+
+    - path: "zk/**"
+      instructions: |
+        This is zero-knowledge proof infrastructure (Circom circuits + JS).
+        Focus on:
+        - Circuit soundness (no under-constrained signals)
+        - Trusted setup correctness
+        - Proof generation/verification edge cases
+        - Input validation before proof generation
+        - Performance of proof generation
+        Reject changes that weaken circuit constraints or skip input validation.
+
+  # Tools configuration
+  tools:
+    ruff:
+      enabled: false
+    ast-grep:
+      enabled: true
+    shellcheck:
+      enabled: true
+
+  # Tone and style
+  tone_instructions: |
+    Be direct and specific. Point to exact lines and suggest concrete fixes.
+    For security issues, explain the attack vector and provide the secure alternative.
+    For performance issues, include the expected improvement.
+    Do not approve PRs that introduce known security vulnerabilities.
+
+  # What to ignore
+  ignore:
+    - "Cargo.lock"
+    - "package-lock.json"
+    - "**/*.test.ts"
+    - "**/*.spec.ts"
+    - "**/test_snapshots/**"
+    - "docs/**"
+    - "*.md"
+
+chat:
+  auto_reply: true
