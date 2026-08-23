@@ -24,6 +24,7 @@ import { CredentialVersioningModule } from './credential-versioning/credential-v
 import { CredentialsModule } from './credentials/credentials.module';
 import { CredentialEventsModule } from './credentials/credential-events.module';
 import { HealthAuthorityModule } from './health-authority/health-authority.module';
+import { CredentialSharingHistoryModule } from './credential-sharing-history/credential-sharing-history.module';
 import { CredentialExportModule } from './credential-export/credential-export.module';
 
 @Module({
@@ -86,6 +87,7 @@ import { CredentialExportModule } from './credential-export/credential-export.mo
     CredentialsModule,
     CredentialEventsModule,
     HealthAuthorityModule,
+    CredentialSharingHistoryModule,
     CredentialExportModule,
   ],
   providers: [

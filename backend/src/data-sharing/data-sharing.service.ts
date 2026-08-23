@@ -5,16 +5,31 @@ import { SharedData } from './data-sharing.entity';
 import { CreateSharedDataDto } from './dto/create-shared-data.dto';
 import { UpdateSharedDataDto } from './dto/update-shared-data.dto';
 
+import { CredentialSharingHistoryService } from '../credential-sharing-history/credential-sharing-history.service';
+import { SharingAction } from '../credential-sharing-history/sharing-history-event.entity';
+
 @Injectable()
 export class DataSharingService {
   constructor(
     @InjectRepository(SharedData)
     private readonly sharedDataRepository: Repository<SharedData>,
+    private readonly historyService: CredentialSharingHistoryService,
   ) {}
 
   async create(createSharedDataDto: CreateSharedDataDto): Promise<SharedData> {
     const sharedData = this.sharedDataRepository.create(createSharedDataDto);
-    return await this.sharedDataRepository.save(sharedData);
+    const saved = await this.sharedDataRepository.save(sharedData);
+
+    await this.historyService.logEvent(
+      saved.id,
+      saved.ownerAddress,
+      saved.recipientAddress,
+      saved.documentHash,
+      SharingAction.SHARED,
+      { expiry: saved.accessExpiry }
+    );
+
+    return saved;
   }
 
   async findAll(): Promise<SharedData[]> {
@@ -38,7 +53,17 @@ export class DataSharingService {
   async revoke(id: string): Promise<SharedData> {
     const sharedData = await this.findOne(id);
     sharedData.isActive = false;
-    return await this.sharedDataRepository.save(sharedData);
+    const saved = await this.sharedDataRepository.save(sharedData);
+
+    await this.historyService.logEvent(
+      saved.id,
+      saved.ownerAddress,
+      saved.recipientAddress,
+      saved.documentHash,
+      SharingAction.REVOKED
+    );
+
+    return saved;
   }
 
   async isShareActive(id: string): Promise<boolean> {
@@ -66,8 +91,20 @@ export class DataSharingService {
 
   async extendShare(id: string, additionalSeconds: number): Promise<SharedData> {
     const sharedData = await this.findOne(id);
+    const oldExpiry = sharedData.accessExpiry;
     sharedData.accessExpiry += additionalSeconds;
-    return await this.sharedDataRepository.save(sharedData);
+    const saved = await this.sharedDataRepository.save(sharedData);
+
+    await this.historyService.logEvent(
+      saved.id,
+      saved.ownerAddress,
+      saved.recipientAddress,
+      saved.documentHash,
+      SharingAction.EXTENDED,
+      { oldExpiry, newExpiry: saved.accessExpiry }
+    );
+
+    return saved;
   }
 
   async findAllByOwner(ownerAddress: string): Promise<SharedData[]> {
@@ -82,12 +119,24 @@ export class DataSharingService {
       where: { documentHash: data.documentHash, ownerAddress: data.ownerAddress },
     });
 
+    let saved: SharedData;
     if (existing) {
       Object.assign(existing, data);
-      return await this.sharedDataRepository.save(existing);
+      saved = await this.sharedDataRepository.save(existing);
+    } else {
+      const sharedData = this.sharedDataRepository.create(data);
+      saved = await this.sharedDataRepository.save(sharedData);
     }
 
-    const sharedData = this.sharedDataRepository.create(data);
-    return await this.sharedDataRepository.save(sharedData);
+    await this.historyService.logEvent(
+      saved.id,
+      saved.ownerAddress,
+      saved.recipientAddress,
+      saved.documentHash,
+      SharingAction.RESTORED,
+      { expiry: saved.accessExpiry }
+    );
+
+    return saved;
   }
 }
