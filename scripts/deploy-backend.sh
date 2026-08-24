@@ -41,7 +41,7 @@ echo ""
 
 # Run database migrations
 echo -e "${YELLOW}Running database migrations...${NC}"
-npm run typeorm migration:run
+npm run migration:run:prod
 echo -e "${GREEN}Migrations complete${NC}"
 echo ""
 
