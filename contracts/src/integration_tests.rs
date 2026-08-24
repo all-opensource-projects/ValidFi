@@ -264,6 +264,77 @@ fn test_get_verification_by_identity() {
     assert_eq!(found_id, v_id);
 }
 
+// ── Zero-Knowledge Proof Validation Tests ────────────────────────────────────
+
+#[test]
+fn test_validate_proof_matching_hashes() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkValid"));
+
+    // Submit a proof whose committed hashes match the raw bytes below.
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+
+    assert!(verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_tampered_proof_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkTampered"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+
+    // Alter one byte of the proof — the integrity check must fail.
+    let tampered = Bytes::from_array(&env, &[9u8; 32]);
+    assert!(!verification.validate_proof(&v_id, &tampered, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_emits_event() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkEvent"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+
+    let events_before = env.events().all().len();
+    let valid = verification.validate_proof(&v_id, &raw_proof, &public_signals);
+    assert!(valid);
+    assert_eq!(env.events().all().len(), events_before + 1);
+}
+
 // ── Credential Revocation Tests ──────────────────────────────────────────────
 
 #[test]
