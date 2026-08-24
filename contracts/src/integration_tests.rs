@@ -1,7 +1,8 @@
 extern crate std;
 
+use soroban_sdk::IntoVal;
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger},
+    testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
     Address, Bytes, BytesN, Env, String,
 };
 
@@ -262,6 +263,244 @@ fn test_get_verification_by_identity() {
 
     let found_id = verification.get_verification_by_identity(&identity_id);
     assert_eq!(found_id, v_id);
+}
+
+// ── Zero-Knowledge Proof Validation Tests ────────────────────────────────────
+
+#[test]
+fn test_validate_proof_matching_hashes() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkValid"));
+
+    // Submit a proof whose committed hashes match the raw bytes below.
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+
+    assert!(verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_pending_record_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkPending"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+
+    // Record is still pending, so even matching hashes must not validate.
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_tampered_proof_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkTampered"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+
+    // Alter one byte of the proof — the integrity check must fail.
+    let tampered = Bytes::from_array(&env, &[9u8; 32]);
+    assert!(!verification.validate_proof(&v_id, &tampered, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_tampered_signals_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkSignals"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+
+    // Tamper only the public signals — the commitment check must fail.
+    let tampered_signals = Bytes::from_array(&env, &[9u8; 32]);
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &tampered_signals));
+}
+
+#[test]
+fn test_validate_proof_revoked_record_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkRevoked"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+    verification.revoke_verification(&v_id, &String::from_str(&env, "compromised"));
+
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_unknown_id_fails() {
+    let (env, _identity, verification, _, _, _) = setup();
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let result = verification.try_validate_proof(&999u64, &raw_proof, &public_signals);
+    assert_eq!(result, Err(Ok(crate::errors::Error::VerificationNotFound)));
+}
+
+#[test]
+fn test_validate_proof_unauthorized_verifier_fails() {
+    // Build a fresh env without mock_all_auths so the verifier's require_auth
+    // must be explicitly satisfied.
+    let env = Env::default();
+
+    let identity_id = env.register_contract(None, IdentityRegistry {});
+    let identity = IdentityRegistryClient::new(&env, &identity_id);
+
+    let verification_id = env.register_contract(None, Verification {});
+    let verification = VerificationClient::new(&env, &verification_id);
+
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // Authorize identity registration, proof submission, and approval, but NOT
+    // validate_proof. This lets us assert that validate_proof rejects when the
+    // stored verifier has not authorized the call.
+    env.mock_auths(&[MockAuth {
+        address: &user,
+        invoke: &MockAuthInvoke {
+            contract: &identity.address,
+            fn_name: "register_identity",
+            args: (
+                user.clone(),
+                doc_hash.clone(),
+                String::from_str(&env, "QmZkAuth"),
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    let identity_id_value =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkAuth"));
+
+    let proof_hash = BytesN::from_array(&env, &[1u8; 32]);
+    let commitment = BytesN::from_array(&env, &[2u8; 32]);
+    env.mock_auths(&[MockAuth {
+        address: &verifier,
+        invoke: &MockAuthInvoke {
+            contract: &verification.address,
+            fn_name: "submit_proof",
+            args: (
+                identity_id_value,
+                verifier.clone(),
+                proof_hash.clone(),
+                commitment.clone(),
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    let v_id = verification.submit_proof(&identity_id_value, &verifier, &proof_hash, &commitment);
+
+    env.mock_auths(&[MockAuth {
+        address: &verifier,
+        invoke: &MockAuthInvoke {
+            contract: &verification.address,
+            fn_name: "approve_verification",
+            args: (v_id,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    verification.approve_verification(&v_id);
+
+    // With no mocked auths, require_auth for validate_proof must reject.
+    env.mock_auths(&[]);
+    let result = verification.try_validate_proof(
+        &v_id,
+        &Bytes::from_array(&env, &[1u8; 32]),
+        &Bytes::from_array(&env, &[2u8; 32]),
+    );
+
+    // require_auth failures surface as an invocation (host) error wrapped in
+    // the outer Err — not as a contract error (Err(Ok(..))) and not as a
+    // successful call. Match that shape explicitly.
+    match result {
+        Err(Err(_)) => {}
+        Err(Ok(err)) => panic!("expected auth failure, got contract error: {err:?}"),
+        Ok(valid) => panic!("validate_proof must fail without authorization, got {valid:?}"),
+    }
+}
+
+#[test]
+fn test_validate_proof_emits_event() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkEvent"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+
+    let events_before = env.events().all().len();
+    let valid = verification.validate_proof(&v_id, &raw_proof, &public_signals);
+    assert!(valid);
+    assert_eq!(env.events().all().len(), events_before + 1);
 }
 
 // ── Credential Revocation Tests ──────────────────────────────────────────────
