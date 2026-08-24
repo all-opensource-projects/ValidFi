@@ -2,8 +2,11 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { isDevelopment } from './config/database.config';
+import { runPendingMigrations } from './database/run-migrations';
 import { StructuredLoggerService } from './common/logger/logger.service';
 
 async function bootstrap() {
@@ -17,6 +20,12 @@ async function bootstrap() {
   const port = configService.get<number>('PORT') ?? 3001;
   const apiPrefix = configService.get<string>('API_PREFIX') ?? 'api/v1';
   const nodeEnv = configService.get<string>('NODE_ENV') ?? 'development';
+
+  // Outside development the schema comes from migrations only, so bring the
+  // database up to date before the app starts accepting traffic.
+  if (!isDevelopment((key) => configService.get<string>(key))) {
+    await runPendingMigrations(app.get(DataSource));
+  }
 
   app.setGlobalPrefix(apiPrefix);
 

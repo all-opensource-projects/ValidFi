@@ -11,6 +11,8 @@ when `NODE_ENV=development`; every other environment (including an unset
 | --- | --- |
 | `src/config/database.config.ts` | Single source of truth for the connection options, shared by the Nest app and the CLI. |
 | `src/data-source.ts` | `DataSource` instance the TypeORM CLI loads (`-d src/data-source.ts`). |
+| `src/database/run-migrations.ts` | Applies pending migrations under a PostgreSQL advisory lock. |
+| `src/migrate.ts` | Standalone deploy entry point (`node dist/migrate.js`). |
 | `src/migrations/` | Generated migration files, applied in timestamp order. |
 
 `src/data-source.ts` loads `.env` itself, so CLI commands pick up the same
@@ -42,17 +44,62 @@ npm run migration:create -- src/migrations/DescriptiveName
 point it at a database that is already up to date with the committed
 migrations, then commit the file it writes.
 
+## Baselining a database built by `synchronize`
+
+Any database created before this workflow existed already has the tables, but
+no row in the `migrations` table. Running `InitialSchema` against it would fail
+on `CREATE TABLE "verifications"` — the table is already there.
+
+Such a database must be **baselined once**: record the initial migration as
+applied without replaying its DDL.
+
+```bash
+# 1. Confirm the live schema really does match the initial migration.
+#    Silence here ("No changes in database schema were found") means they agree.
+npm run migration:generate -- src/migrations/BaselineCheck
+
+# 2. If — and only if — step 1 reported no changes, mark migrations as applied
+#    without executing them.
+npm run migration:baseline          # from source
+npm run migration:baseline:prod     # from dist/, on a deployment host
+```
+
+If step 1 *does* emit a migration, the live schema has drifted from the
+entities. Delete the generated file, reconcile the difference deliberately, and
+only then baseline. Rehearse the whole procedure against a restored copy of the
+production database before touching production.
+
+Fresh databases need none of this — `migration:run` handles them.
+
 ## Production
 
-Two independent paths apply pending migrations, so a deploy is safe either way:
+Two paths apply pending migrations, and both take the same advisory lock, so a
+deploy is safe either way:
 
-1. **On startup.** `migrationsRun` is `true` whenever `NODE_ENV` is not
-   `development`, so the app applies pending migrations before it serves
-   traffic.
+1. **On startup.** Whenever `NODE_ENV` is not `development`, `main.ts` calls
+   `runPendingMigrations` before `app.listen()`, so the app never serves
+   traffic against a stale schema.
 2. **From the deploy script.** `scripts/deploy-backend.sh` runs
-   `npm run migration:run:prod` after the build. The `:prod` variants use the
-   compiled `dist/data-source.js` and the plain `typeorm` binary, so they work
-   on a host installed with `npm install --production` (no `ts-node`).
+   `npm run migration:run:prod` after the build, which executes
+   `node dist/migrate.js` — no `ts-node`, so it works on a host installed with
+   `npm install --production`.
+
+### Why the advisory lock
+
+TypeORM decides which migrations are pending *before* recording them and takes
+no cross-process lock of its own. During a rolling deploy, or with more than
+one replica, two processes can therefore each conclude the same migration is
+pending and run its non-idempotent DDL twice. `runPendingMigrations` wraps the
+run in a PostgreSQL session-level advisory lock
+(`MIGRATION_ADVISORY_LOCK_KEY`): the second process blocks until the first
+commits, then finds nothing left to apply.
+
+This relies on a session-pooled connection. Behind a transaction-pooling proxy
+(PgBouncer in `transaction` mode), session-level advisory locks are not held
+across statements — point migrations at a direct connection there.
+
+`migrationsRun` is deliberately left `false` everywhere, because TypeORM's own
+bootstrap hook runs migrations before this lock can be taken.
 
 ## Adding an entity
 

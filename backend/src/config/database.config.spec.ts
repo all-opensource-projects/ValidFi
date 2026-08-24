@@ -8,16 +8,25 @@ describe('buildDatabaseOptions', () => {
     const options = buildDatabaseOptions(reader({ NODE_ENV: 'development' }));
 
     expect(options.synchronize).toBe(true);
-    expect(options.migrationsRun).toBe(false);
   });
 
   it.each(['production', 'staging', 'test', undefined])(
-    'disables synchronize and runs migrations when NODE_ENV is %s',
+    'disables synchronize when NODE_ENV is %s',
     (nodeEnv) => {
       const options = buildDatabaseOptions(reader({ NODE_ENV: nodeEnv }));
 
       expect(options.synchronize).toBe(false);
-      expect(options.migrationsRun).toBe(true);
+    },
+  );
+
+  it.each(['development', 'production', undefined])(
+    'never lets TypeORM auto-run migrations when NODE_ENV is %s',
+    (nodeEnv) => {
+      // Migrations are applied explicitly by `runPendingMigrations`, which
+      // holds an advisory lock that `migrationsRun` cannot take.
+      const options = buildDatabaseOptions(reader({ NODE_ENV: nodeEnv }));
+
+      expect(options.migrationsRun).toBe(false);
     },
   );
 

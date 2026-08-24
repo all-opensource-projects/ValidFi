@@ -35,8 +35,11 @@ export const buildDatabaseOptions = (get: EnvReader): DataSourceOptions => {
     // Auto schema sync is a development-only convenience; every other
     // environment gets its schema exclusively from migrations.
     synchronize: development,
-    // Outside development, apply pending migrations before serving traffic.
-    migrationsRun: !development,
+    // Migrations are never run by TypeORM's own bootstrap hook: outside
+    // development the app applies them explicitly in `main.ts` via
+    // `runPendingMigrations`, which serialises concurrent instances behind a
+    // PostgreSQL advisory lock that `migrationsRun` cannot take.
+    migrationsRun: false,
     logging: development,
   };
 };
