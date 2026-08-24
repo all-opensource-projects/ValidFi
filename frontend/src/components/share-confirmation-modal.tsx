@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Share2, Shield, Clock, CheckCircle } from 'lucide-react';
 import { useAccessibility } from '@/contexts/AccessibilityContext';
+import { getFocusableElements } from '@/utils/focusManagement';
 
 interface ShareSummary {
   recipient: string;
@@ -32,17 +33,42 @@ export function ShareConfirmationModal({
   onCancel,
 }: ShareConfirmationModalProps) {
   const { announceToScreenReader } = useAccessibility();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       announceToScreenReader('Share confirmation dialog opened');
+      // Move focus into the dialog so keyboard/screen-reader users land inside.
+      const focusable = dialogRef.current ? getFocusableElements(dialogRef.current) : [];
+      if (focusable.length > 0) {
+        focusable[0].focus();
+      } else {
+        dialogRef.current?.focus();
+      }
     }
   }, [isOpen, announceToScreenReader]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
+        e.preventDefault();
         onCancel();
+        return;
+      }
+      // Trap Tab and Shift+Tab within the dialog while it is open.
+      if (e.key === 'Tab' && dialogRef.current) {
+        const focusable = getFocusableElements(dialogRef.current);
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     },
     [onCancel]
@@ -75,6 +101,8 @@ export function ShareConfirmationModal({
 
           {/* Modal content */}
           <motion.div
+            ref={dialogRef}
+            tabIndex={-1}
             className="relative bg-gradient-to-br from-gray-900 to-gray-800 border border-green-500/30 rounded-t-2xl sm:rounded-2xl p-4 sm:p-6 max-w-md w-full mx-0 sm:mx-4 shadow-2xl max-h-[90vh] overflow-y-auto"
             initial={{ scale: 0.9, y: 20, opacity: 0 }}
             animate={{ scale: 1, y: 0, opacity: 1 }}

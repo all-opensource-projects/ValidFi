@@ -7,7 +7,7 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<AccessibilityProvider>{ui}</AccessibilityProvider>);
 }
 
-const VALID_RECIPIENT = 'G' + 'A'.repeat(55);
+const VALID_RECIPIENT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZKY';
 
 describe('CredentialSharing', () => {
   const walletAddress = 'GABCDEF123456...';
@@ -71,6 +71,20 @@ describe('CredentialSharing', () => {
     const recipientInput = screen.getByLabelText('Recipient Wallet Address');
 
     await user.type(recipientInput, 'not-a-stellar-address');
+
+    expect(
+      screen.getByText('Enter a valid Stellar address (starts with G, 56 characters total)')
+    ).toBeInTheDocument();
+  });
+
+  it('rejects a well-formed but checksum-invalid recipient address', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+    const recipientInput = screen.getByLabelText('Recipient Wallet Address');
+
+    // 56 chars in the right alphabet, but the CRC16 checksum is wrong.
+    const badChecksum = 'G' + 'B'.repeat(55);
+    await user.type(recipientInput, badChecksum);
 
     expect(
       screen.getByText('Enter a valid Stellar address (starts with G, 56 characters total)')

@@ -7,6 +7,7 @@ import { AnimatedProgress, SuccessOverlay, SuccessToast } from './animations';
 import { ShareConfirmationModal } from './share-confirmation-modal';
 import { useAccessibility } from '@/contexts/AccessibilityContext';
 import { useCredentialOperation } from '@/hooks/useCredentialOperation';
+import { isValidStellarAddress } from '@/utils/stellar-address';
 import { AlertCircle } from 'lucide-react';
 
 interface CredentialSharingProps {
@@ -41,9 +42,18 @@ const DURATION_OPTIONS = [
   { value: '2592000', label: '1 month' },
 ];
 
-// Stellar public keys are 56 chars: "G" followed by 55 base32 (A-Z, 2-7) chars.
+// Stellar public keys are 56 chars with a version byte and CRC16-XModem
+// checksum; validate the checksum so a typo'd address can't receive a share.
 function isValidRecipient(address: string): boolean {
-  return /^G[A-Z2-7]{55}$/.test(address.trim());
+  return isValidStellarAddress(address);
+}
+
+// A share is expired once its expiry time passes, regardless of the stored
+// status. Derive the effective status so the list never shows stale "active".
+function effectiveStatus(share: { status: SharedCredential['status']; expiresAt: string }): SharedCredential['status'] {
+  if (share.status === 'revoked') return 'revoked';
+  if (Date.now() > new Date(share.expiresAt).getTime()) return 'expired';
+  return 'active';
 }
 
 export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
@@ -320,7 +330,9 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                 <p className="text-sm sm:text-base">No credentials shared yet</p>
               </motion.div>
             ) : (
-              sharedCredentials.map((share, index) => (
+              sharedCredentials.map((share, index) => {
+                const status = effectiveStatus(share);
+                return (
                 <motion.div
                   key={share.id}
                   className="bg-white/10 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
@@ -330,24 +342,24 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                   transition={{ delay: index * 0.05, type: 'spring', stiffness: 300, damping: 25 }}
                   layout
                   role="listitem"
-                  aria-label={`${share.vaccineType} shared with ${share.recipient}, status ${share.status}, expires ${new Date(share.expiresAt).toLocaleString()}`}
+                  aria-label={`${share.vaccineType} shared with ${share.recipient}, status ${status}, expires ${new Date(share.expiresAt).toLocaleString()}`}
                 >
                   <div className="flex items-center gap-3 sm:gap-4">
                     <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 flex-shrink-0" aria-hidden="true" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="text-white font-medium text-sm sm:text-base">{share.vaccineType}</p>
-                        {share.status === 'active' && (
+                        {status === 'active' && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
                             Active
                           </span>
                         )}
-                        {share.status === 'revoked' && (
+                        {status === 'revoked' && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
                             Revoked
                           </span>
                         )}
-                        {share.status === 'expired' && (
+                        {status === 'expired' && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
                             Expired
                           </span>
@@ -360,7 +372,7 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                       </p>
                     </div>
                   </div>
-                  {share.status === 'active' && (
+                  {status === 'active' && (
                     <motion.button
                       className="text-red-400 hover:text-red-300 transition-colors self-end sm:self-auto p-2 -m-2 touch-manipulation"
                       onClick={() => handleRevoke(share.id, share.vaccineType)}
@@ -375,7 +387,8 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                     </motion.button>
                   )}
                 </motion.div>
-              ))
+                );
+              })
             )}
           </AnimatePresence>
         </div>
