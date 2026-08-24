@@ -284,8 +284,31 @@ fn test_validate_proof_matching_hashes() {
     let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
 
     let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
 
     assert!(verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_pending_record_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkPending"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+
+    // Record is still pending, so even matching hashes must not validate.
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &public_signals));
 }
 
 #[test]
@@ -305,10 +328,69 @@ fn test_validate_proof_tampered_proof_fails() {
     let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
 
     let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
 
     // Alter one byte of the proof — the integrity check must fail.
     let tampered = Bytes::from_array(&env, &[9u8; 32]);
     assert!(!verification.validate_proof(&v_id, &tampered, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_tampered_signals_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkSignals"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+
+    // Tamper only the public signals — the commitment check must fail.
+    let tampered_signals = Bytes::from_array(&env, &[9u8; 32]);
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &tampered_signals));
+}
+
+#[test]
+fn test_validate_proof_revoked_record_fails() {
+    let (env, identity, verification, _, _, _) = setup();
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    let identity_id =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkRevoked"));
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let proof_hash: BytesN<32> = env.crypto().sha256(&raw_proof).into();
+    let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
+
+    let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
+    verification.revoke_verification(&v_id, &String::from_str(&env, "compromised"));
+
+    assert!(!verification.validate_proof(&v_id, &raw_proof, &public_signals));
+}
+
+#[test]
+fn test_validate_proof_unknown_id_fails() {
+    let (env, _identity, verification, _, _, _) = setup();
+
+    let raw_proof = Bytes::from_array(&env, &[7u8; 32]);
+    let public_signals = Bytes::from_array(&env, &[8u8; 32]);
+
+    let result = verification.try_validate_proof(&999u64, &raw_proof, &public_signals);
+    assert!(result.is_err());
 }
 
 #[test]
@@ -328,6 +410,7 @@ fn test_validate_proof_emits_event() {
     let commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
 
     let v_id = verification.submit_proof(&identity_id, &verifier, &proof_hash, &commitment);
+    verification.approve_verification(&v_id);
 
     let events_before = env.events().all().len();
     let valid = verification.validate_proof(&v_id, &raw_proof, &public_signals);

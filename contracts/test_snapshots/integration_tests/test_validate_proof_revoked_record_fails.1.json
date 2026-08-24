@@ -20,7 +20,7 @@
                   "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
                 },
                 {
-                  "string": "QmZkEvent"
+                  "string": "QmZkRevoked"
                 }
               ]
             }
@@ -68,6 +68,28 @@
               "args": [
                 {
                   "u64": 1
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "function_name": "revoke_verification",
+              "args": [
+                {
+                  "u64": 1
+                },
+                {
+                  "string": "compromised"
                 }
               ]
             }
@@ -169,7 +191,7 @@
                                 "symbol": "ipfs_cid"
                               },
                               "val": {
-                                "string": "QmZkEvent"
+                                "string": "QmZkRevoked"
                               }
                             },
                             {
@@ -350,7 +372,7 @@
                         "symbol": "revocation_reason"
                       },
                       "val": {
-                        "string": ""
+                        "string": "compromised"
                       }
                     },
                     {
@@ -358,7 +380,7 @@
                         "symbol": "revoked"
                       },
                       "val": {
-                        "bool": false
+                        "bool": true
                       }
                     },
                     {
@@ -392,6 +414,49 @@
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                       }
+                    }
+                  ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          535680
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "RevokedList"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "RevokedList"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "vec": [
+                    {
+                      "u64": 1
                     }
                   ]
                 }
@@ -583,6 +648,39 @@
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
             "key": {
               "ledger_key_nonce": {
+                "nonce": 2032731177588607455
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 2032731177588607455
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+            "key": {
+              "ledger_key_nonce": {
                 "nonce": 4837995959683129791
               }
             },
@@ -694,7 +792,7 @@
                   "bytes": "0101010101010101010101010101010101010101010101010101010101010101"
                 },
                 {
-                  "string": "QmZkEvent"
+                  "string": "QmZkRevoked"
                 }
               ]
             }
@@ -877,6 +975,87 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
               },
               {
+                "symbol": "revoke_verification"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u64": 1
+                },
+                {
+                  "string": "compromised"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "string": "revocation"
+              },
+              {
+                "u64": 1
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "Revoked"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000003",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "revoke_verification"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000003"
+              },
+              {
                 "symbol": "validate_proof"
               }
             ],
@@ -919,7 +1098,7 @@
                   "symbol": "Validated"
                 },
                 {
-                  "bool": true
+                  "bool": false
                 }
               ]
             }
@@ -944,7 +1123,7 @@
               }
             ],
             "data": {
-              "bool": true
+              "bool": false
             }
           }
         }

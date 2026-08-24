@@ -224,12 +224,16 @@ impl Verification {
         Ok(record.status == String::from_str(env, "approved") && !record.revoked)
     }
 
-    /// Validate a submitted zero-knowledge proof against the committed hashes.
+    /// Check the integrity of submitted proof bytes against the stored
+    /// commitments.
     ///
     /// Recomputes the SHA-256 of the raw proof bytes and the public signals,
     /// then compares them to the `proof_hash` and `verification_commitment`
-    /// stored when the proof was submitted. Returns `true` only when both the
-    /// proof integrity and the commitment match and the record is not revoked.
+    /// stored when the proof was submitted. Returns `true` only when the
+    /// digests match, the record is approved, and it has not been revoked.
+    ///
+    /// This is an integrity check only — it does not verify the zero-knowledge
+    /// proof itself. A caller that knows the committed preimage always passes.
     pub fn validate_proof(
         env: &Env,
         verification_id: u64,
@@ -237,6 +241,8 @@ impl Verification {
         public_signals: Bytes,
     ) -> Result<bool, Error> {
         let record = read_record(env, verification_id)?;
+
+        record.verifier.require_auth();
 
         if record.revoked {
             env.events().publish(
@@ -252,7 +258,9 @@ impl Verification {
         let computed_commitment: BytesN<32> = env.crypto().sha256(&public_signals).into();
         let commitment_ok = computed_commitment == record.verification_commitment;
 
-        let valid = proof_integrity_ok && commitment_ok;
+        let approved = record.status == String::from_str(env, "approved");
+
+        let valid = proof_integrity_ok && commitment_ok && approved;
 
         env.events().publish(
             (String::from_str(env, "proof_validation"), verification_id),
