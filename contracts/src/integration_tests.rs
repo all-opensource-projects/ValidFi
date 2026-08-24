@@ -467,7 +467,15 @@ fn test_validate_proof_unauthorized_verifier_fails() {
         &Bytes::from_array(&env, &[1u8; 32]),
         &Bytes::from_array(&env, &[2u8; 32]),
     );
-    assert!(result.is_err());
+
+    // require_auth failures surface as an invocation (host) error wrapped in
+    // the outer Err — not as a contract error (Err(Ok(..))) and not as a
+    // successful call. Match that shape explicitly.
+    match result {
+        Err(Err(_)) => {}
+        Err(Ok(err)) => panic!("expected auth failure, got contract error: {err:?}"),
+        Ok(valid) => panic!("validate_proof must fail without authorization, got {valid:?}"),
+    }
 }
 
 #[test]
