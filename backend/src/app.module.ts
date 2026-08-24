@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CacheModule } from '@nestjs/cache-manager';
@@ -26,12 +26,15 @@ import { CredentialEventsModule } from './credentials/credential-events.module';
 import { HealthAuthorityModule } from './health-authority/health-authority.module';
 import { CredentialSharingHistoryModule } from './credential-sharing-history/credential-sharing-history.module';
 import { CredentialExportModule } from './credential-export/credential-export.module';
+import { LoggerModule } from './common/logger/logger.module';
+import { RequestContextMiddleware } from './common/logger/logger.middleware';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    LoggerModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({
@@ -97,4 +100,8 @@ import { CredentialExportModule } from './credential-export/credential-export.mo
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestContextMiddleware).forRoutes('*');
+  }
+}

@@ -4,11 +4,16 @@ import { ConfigService } from '@nestjs/config';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { StructuredLoggerService } from './common/logger/logger.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
+  const logger = app.get(StructuredLoggerService);
+
+  app.useLogger(logger);
+
   const port = configService.get<number>('PORT') ?? 3001;
   const apiPrefix = configService.get<string>('API_PREFIX') ?? 'api/v1';
   const nodeEnv = configService.get<string>('NODE_ENV') ?? 'development';
@@ -54,9 +59,15 @@ async function bootstrap() {
   }
 
   await app.listen(port);
-  console.log(`API: http://localhost:${port}/${apiPrefix}`);
+  logger.log(`API server started`, {
+    port,
+    apiPrefix: `http://localhost:${port}/${apiPrefix}`,
+    environment: nodeEnv,
+  });
   if (nodeEnv !== 'production') {
-    console.log(`Docs: http://localhost:${port}/docs`);
+    logger.log(`Swagger docs available`, {
+      docsUrl: `http://localhost:${port}/docs`,
+    });
   }
 }
 
