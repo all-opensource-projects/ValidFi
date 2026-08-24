@@ -1,7 +1,8 @@
 extern crate std;
 
+use soroban_sdk::IntoVal;
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger},
+    testutils::{Address as _, Events, Ledger, MockAuth, MockAuthInvoke},
     Address, Bytes, BytesN, Env, String,
 };
 
@@ -390,6 +391,82 @@ fn test_validate_proof_unknown_id_fails() {
     let public_signals = Bytes::from_array(&env, &[8u8; 32]);
 
     let result = verification.try_validate_proof(&999u64, &raw_proof, &public_signals);
+    assert_eq!(result, Err(Ok(crate::errors::Error::VerificationNotFound)));
+}
+
+#[test]
+fn test_validate_proof_unauthorized_verifier_fails() {
+    // Build a fresh env without mock_all_auths so the verifier's require_auth
+    // must be explicitly satisfied.
+    let env = Env::default();
+
+    let identity_id = env.register_contract(None, IdentityRegistry {});
+    let identity = IdentityRegistryClient::new(&env, &identity_id);
+
+    let verification_id = env.register_contract(None, Verification {});
+    let verification = VerificationClient::new(&env, &verification_id);
+
+    let user = Address::generate(&env);
+    let verifier = Address::generate(&env);
+    let doc_hash = BytesN::from_array(&env, &[1u8; 32]);
+
+    // Authorize identity registration, proof submission, and approval, but NOT
+    // validate_proof. This lets us assert that validate_proof rejects when the
+    // stored verifier has not authorized the call.
+    env.mock_auths(&[MockAuth {
+        address: &user,
+        invoke: &MockAuthInvoke {
+            contract: &identity.address,
+            fn_name: "register_identity",
+            args: (
+                user.clone(),
+                doc_hash.clone(),
+                String::from_str(&env, "QmZkAuth"),
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    let identity_id_value =
+        identity.register_identity(&user, &doc_hash, &String::from_str(&env, "QmZkAuth"));
+
+    let proof_hash = BytesN::from_array(&env, &[1u8; 32]);
+    let commitment = BytesN::from_array(&env, &[2u8; 32]);
+    env.mock_auths(&[MockAuth {
+        address: &verifier,
+        invoke: &MockAuthInvoke {
+            contract: &verification.address,
+            fn_name: "submit_proof",
+            args: (
+                identity_id_value,
+                verifier.clone(),
+                proof_hash.clone(),
+                commitment.clone(),
+            )
+                .into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    let v_id = verification.submit_proof(&identity_id_value, &verifier, &proof_hash, &commitment);
+
+    env.mock_auths(&[MockAuth {
+        address: &verifier,
+        invoke: &MockAuthInvoke {
+            contract: &verification.address,
+            fn_name: "approve_verification",
+            args: (v_id,).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    verification.approve_verification(&v_id);
+
+    // With no mocked auths, require_auth for validate_proof must reject.
+    env.mock_auths(&[]);
+    let result = verification.try_validate_proof(
+        &v_id,
+        &Bytes::from_array(&env, &[1u8; 32]),
+        &Bytes::from_array(&env, &[2u8; 32]),
+    );
     assert!(result.is_err());
 }
 
