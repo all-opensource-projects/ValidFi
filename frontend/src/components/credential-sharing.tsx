@@ -1,15 +1,22 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Share2, Lock, Clock, X, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedProgress, SuccessOverlay, SuccessToast } from './animations';
+import { ShareConfirmationModal } from './share-confirmation-modal';
 import { useAccessibility } from '@/contexts/AccessibilityContext';
 import { useCredentialOperation } from '@/hooks/useCredentialOperation';
+import { isValidStellarAddress } from '@/utils/stellar-address';
 import { AlertCircle } from 'lucide-react';
 
 interface CredentialSharingProps {
   walletAddress: string;
+}
+
+interface SelectableCredential {
+  id: string;
+  vaccineType: string;
 }
 
 interface SharedCredential {
@@ -17,20 +24,90 @@ interface SharedCredential {
   vaccineType: string;
   recipient: string;
   expiresAt: string;
+  status: 'active' | 'revoked' | 'expired';
+}
+
+// Credentials available to share, mirroring the mock data used elsewhere in the
+// vault/verification views until real credential records are wired up.
+const AVAILABLE_CREDENTIALS: SelectableCredential[] = [
+  { id: 'covid-pfizer', vaccineType: 'COVID-19 (Pfizer)' },
+  { id: 'influenza-2025', vaccineType: 'Influenza 2025' },
+  { id: 'hepatitis-b', vaccineType: 'Hepatitis B' },
+];
+
+const DURATION_OPTIONS = [
+  { value: '3600', label: '1 hour' },
+  { value: '86400', label: '1 day' },
+  { value: '604800', label: '1 week' },
+  { value: '2592000', label: '1 month' },
+];
+
+// Stellar public keys are 56 chars with a version byte and CRC16-XModem
+// checksum; validate the checksum so a typo'd address can't receive a share.
+function isValidRecipient(address: string): boolean {
+  return isValidStellarAddress(address);
+}
+
+// A share is expired once its expiry time passes, regardless of the stored
+// status. Derive the effective status so the list never shows stale "active".
+function effectiveStatus(
+  share: { status: SharedCredential['status']; expiresAt: string },
+  now: number
+): SharedCredential['status'] {
+  if (share.status === 'revoked') return 'revoked';
+  if (now >= new Date(share.expiresAt).getTime()) return 'expired';
+  return 'active';
 }
 
 export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
+  const [recipient, setRecipient] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [durationSeconds, setDurationSeconds] = useState(86400);
   const [sharedCredentials, setSharedCredentials] = useState<SharedCredential[]>([]);
   const [shareProgress, setShareProgress] = useState(0);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [toast, setToast] = useState<{ show: boolean; title: string; description?: string }>({
     show: false,
     title: '',
   });
   const { announceToScreenReader } = useAccessibility();
   const shareButtonRef = useRef<HTMLButtonElement>(null);
-  
+  const statusRegionRef = useRef<HTMLDivElement>(null);
+
   const { execute, error, clearError, isPending: isSharing } = useCredentialOperation();
+
+  // Re-render active shares exactly when the nearest not-yet-expired one
+  // expires. Depending on `now` reschedules after every expiry transition.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const nextExpiry = sharedCredentials
+      .filter((s) => s.status !== 'revoked')
+      .map((s) => new Date(s.expiresAt).getTime())
+      .filter((expiry) => expiry > now)
+      .sort((a, b) => a - b)[0];
+
+    if (nextExpiry === undefined) return;
+
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, nextExpiry - Date.now()));
+    return () => clearTimeout(timer);
+  }, [sharedCredentials, now]);
+
+  const selectedCredentials = useMemo(
+    () => AVAILABLE_CREDENTIALS.filter((credential) => selectedIds.includes(credential.id)),
+    [selectedIds]
+  );
+
+  const formInvalid = !isValidRecipient(recipient) || selectedCredentials.length === 0;
+
+  const toggleCredential = useCallback(
+    (id: string) => {
+      setSelectedIds((prev) =>
+        prev.includes(id) ? prev.filter((existing) => existing !== id) : [...prev, id]
+      );
+    },
+    []
+  );
 
   const handleShare = useCallback(async () => {
     if (isSharing) return;
@@ -62,24 +139,42 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
           setShowSuccess(true);
           announceToScreenReader('Proof generated successfully');
 
-          const newShare: SharedCredential = {
+          const expiresAt = new Date(Date.now() + durationSeconds * 1000).toISOString();
+          const newShares: SharedCredential[] = selectedCredentials.map((credential) => ({
             id: crypto.randomUUID(),
-            vaccineType: 'COVID-19 Vaccination',
-            recipient: 'GABCDEF123456...',
-            expiresAt: new Date(Date.now() + 86400000).toISOString(),
-          };
-          setSharedCredentials((prev) => [...prev, newShare]);
+            vaccineType: credential.vaccineType,
+            recipient: recipient.trim(),
+            expiresAt,
+            status: 'active',
+          }));
+          setSharedCredentials((prev) => [...prev, ...newShares]);
           resolve();
         }, 2400);
       });
     }, {
       context: 'ShareCredential',
     });
-  }, [isSharing, clearError, execute, announceToScreenReader]);
+  }, [isSharing, clearError, execute, announceToScreenReader, selectedCredentials, recipient, durationSeconds]);
+
+  const handleSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
+      if (formInvalid) return;
+      setIsConfirmOpen(true);
+    },
+    [formInvalid]
+  );
+
+  const handleConfirmShare = useCallback(() => {
+    setIsConfirmOpen(false);
+    void handleShare();
+  }, [handleShare]);
 
   const handleRevoke = useCallback(
     (id: string, vaccineType: string) => {
-      setSharedCredentials((prev) => prev.filter((c) => c.id !== id));
+      setSharedCredentials((prev) =>
+        prev.map((share) => (share.id === id ? { ...share, status: 'revoked' } : share))
+      );
       setToast({
         show: true,
         title: 'Access Revoked',
@@ -91,15 +186,12 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
     [announceToScreenReader]
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent, action: () => void) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        action();
-      }
-    },
-    []
-  );
+  const handleKeyDown = useCallback((e: React.KeyboardEvent, action: () => void) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      action();
+    }
+  }, []);
 
   return (
     <div role="region" aria-labelledby="sharing-heading">
@@ -110,13 +202,7 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
       {/* Share form */}
       <div className="bg-white/10 rounded-lg p-4 sm:p-6 mb-4 sm:mb-6">
         <h3 className="text-base sm:text-lg font-semibold text-white mb-3 sm:mb-4">Share Vaccination Proof</h3>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleShare();
-          }}
-          className="space-y-3 sm:space-y-4"
-        >
+        <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-4">
           <div>
             <label htmlFor="recipient-address" className="block text-green-200 text-xs sm:text-sm mb-1 sm:mb-2">
               Recipient Wallet Address
@@ -125,41 +211,68 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
               id="recipient-address"
               type="text"
               placeholder="G..."
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
               disabled={isSharing}
               aria-required="true"
               aria-describedby="recipient-help"
+              aria-invalid={recipient !== '' && !isValidRecipient(recipient)}
               className="w-full bg-white/10 border border-green-400 rounded-lg px-3 sm:px-4 py-3 sm:py-2 text-white placeholder-green-300 focus:outline-none focus:border-green-300 disabled:opacity-50 text-base sm:text-sm"
             />
             <p id="recipient-help" className="text-xs text-green-300 mt-1">
               Enter the Stellar wallet address of the recipient
             </p>
+            {recipient !== '' && !isValidRecipient(recipient) && (
+              <p className="text-xs text-red-300 mt-1" role="alert">
+                Enter a valid Stellar address (starts with G, 56 characters total)
+              </p>
+            )}
           </div>
-          <div>
-            <label htmlFor="credential-select" className="block text-green-200 text-xs sm:text-sm mb-1 sm:mb-2">
-              Select Vaccination Credential
-            </label>
-            <select
-              id="credential-select"
-              disabled={isSharing}
-              aria-required="true"
-              className="w-full bg-white/10 border border-green-400 rounded-lg px-3 sm:px-4 py-3 sm:py-2 text-white focus:outline-none focus:border-green-300 disabled:opacity-50 text-base sm:text-sm"
-            >
-              <option value="">Choose a credential...</option>
-            </select>
-          </div>
+
+          <fieldset>
+            <legend className="block text-green-200 text-xs sm:text-sm mb-1 sm:mb-2">
+              Select Credentials to Share
+            </legend>
+            <div role="group" aria-label="Select credentials to share" className="space-y-2">
+              {AVAILABLE_CREDENTIALS.map((credential) => {
+                const checked = selectedIds.includes(credential.id);
+                return (
+                  <label
+                    key={credential.id}
+                    className="flex items-center gap-3 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 cursor-pointer transition-colors"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleCredential(credential.id)}
+                      disabled={isSharing}
+                      className="w-4 h-4 accent-green-500"
+                      aria-label={`Share ${credential.vaccineType}`}
+                    />
+                    <Shield className="w-4 h-4 text-green-400 shrink-0" aria-hidden="true" />
+                    <span className="text-white text-sm">{credential.vaccineType}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+
           <div>
             <label htmlFor="duration-select" className="block text-green-200 text-xs sm:text-sm mb-1 sm:mb-2">
               Proof Duration
             </label>
             <select
               id="duration-select"
+              value={durationSeconds}
+              onChange={(e) => setDurationSeconds(Number(e.target.value))}
               disabled={isSharing}
               className="w-full bg-white/10 border border-green-400 rounded-lg px-3 sm:px-4 py-3 sm:py-2 text-white focus:outline-none focus:border-green-300 disabled:opacity-50 text-base sm:text-sm"
             >
-              <option value="3600">1 hour</option>
-              <option value="86400">1 day</option>
-              <option value="604800">1 week</option>
-              <option value="2592000">1 month</option>
+              {DURATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-gray-900">
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -200,16 +313,18 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
           <motion.button
             ref={shareButtonRef}
             type="submit"
+            disabled={isSharing || formInvalid}
             className={`w-full py-3 sm:py-3 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 touch-manipulation ${
               isSharing
                 ? 'bg-green-600/50 cursor-not-allowed text-white/70'
-                : 'bg-green-600 hover:bg-green-700 active:bg-green-800 text-white'
+                : formInvalid
+                  ? 'bg-green-600/40 cursor-not-allowed text-white/50'
+                  : 'bg-green-600 hover:bg-green-700 active:bg-green-800 text-white'
             }`}
-            disabled={isSharing}
             aria-busy={isSharing}
             aria-label={isSharing ? 'Generating zero-knowledge proof' : 'Share vaccination proof'}
-            whileHover={isSharing ? {} : { scale: 1.01 }}
-            whileTap={isSharing ? {} : { scale: 0.99 }}
+            whileHover={isSharing || formInvalid ? {} : { scale: 1.01 }}
+            whileTap={isSharing || formInvalid ? {} : { scale: 0.99 }}
           >
             <Share2 className="w-5 h-5" aria-hidden="true" />
             {isSharing ? 'Generating Proof...' : 'Share Vaccination Proof'}
@@ -235,7 +350,9 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                 <p className="text-sm sm:text-base">No credentials shared yet</p>
               </motion.div>
             ) : (
-              sharedCredentials.map((share, index) => (
+              sharedCredentials.map((share, index) => {
+                const status = effectiveStatus(share, now);
+                return (
                 <motion.div
                   key={share.id}
                   className="bg-white/10 rounded-lg p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
@@ -245,12 +362,29 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                   transition={{ delay: index * 0.05, type: 'spring', stiffness: 300, damping: 25 }}
                   layout
                   role="listitem"
-                  aria-label={`${share.vaccineType} shared with ${share.recipient}, expires ${new Date(share.expiresAt).toLocaleString()}`}
+                  aria-label={`${share.vaccineType} shared with ${share.recipient}, status ${status}, expires ${new Date(share.expiresAt).toLocaleString()}`}
                 >
                   <div className="flex items-center gap-3 sm:gap-4">
                     <Lock className="w-6 h-6 sm:w-8 sm:h-8 text-green-400 flex-shrink-0" aria-hidden="true" />
                     <div className="min-w-0">
-                      <p className="text-white font-medium text-sm sm:text-base">{share.vaccineType}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-white font-medium text-sm sm:text-base">{share.vaccineType}</p>
+                        {status === 'active' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-300 border border-green-500/30">
+                            Active
+                          </span>
+                        )}
+                        {status === 'revoked' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/30">
+                            Revoked
+                          </span>
+                        )}
+                        {status === 'expired' && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-500/20 text-yellow-300 border border-yellow-500/30">
+                            Expired
+                          </span>
+                        )}
+                      </div>
                       <p className="text-green-200 text-xs sm:text-sm truncate">Shared with: {share.recipient}</p>
                       <p className="text-green-200 text-xs sm:text-sm flex items-center gap-1">
                         <Clock className="w-3 h-3 sm:w-4 sm:h-4" aria-hidden="true" />
@@ -258,24 +392,54 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
                       </p>
                     </div>
                   </div>
-                  <motion.button
-                    className="text-red-400 hover:text-red-300 transition-colors self-end sm:self-auto p-2 -m-2 touch-manipulation"
-                    onClick={() => handleRevoke(share.id, share.vaccineType)}
-                    onKeyDown={(e) =>
-                      handleKeyDown(e, () => handleRevoke(share.id, share.vaccineType))
-                    }
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.9 }}
-                    aria-label={`Revoke access for ${share.vaccineType}`}
-                  >
-                    <X className="w-5 h-5" aria-hidden="true" />
-                  </motion.button>
+                  {status === 'active' && (
+                    <motion.button
+                      className="text-red-400 hover:text-red-300 transition-colors self-end sm:self-auto p-2 -m-2 touch-manipulation"
+                      onClick={() => handleRevoke(share.id, share.vaccineType)}
+                      onKeyDown={(e) =>
+                        handleKeyDown(e, () => handleRevoke(share.id, share.vaccineType))
+                      }
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.9 }}
+                      aria-label={`Revoke access for ${share.vaccineType}`}
+                    >
+                      <X className="w-5 h-5" aria-hidden="true" />
+                    </motion.button>
+                  )}
                 </motion.div>
-              ))
+                );
+              })
             )}
           </AnimatePresence>
         </div>
       </div>
+
+      {/* Share confirmation dialog */}
+      <ShareConfirmationModal
+        isOpen={isConfirmOpen}
+        summary={
+          isConfirmOpen
+            ? {
+                recipient: recipient.trim(),
+                credentials: selectedCredentials,
+                durationSeconds,
+              }
+            : null
+        }
+        onConfirm={handleConfirmShare}
+        onCancel={() => setIsConfirmOpen(false)}
+        returnFocusTo={shareButtonRef.current}
+        postConfirmFocusRef={statusRegionRef}
+      />
+
+      {/* Status region: receives focus when the share button is disabled after confirmation. */}
+      <div
+        ref={statusRegionRef}
+        tabIndex={-1}
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      />
 
       {/* Success overlay */}
       <SuccessOverlay show={showSuccess} variant="share" onDismiss={() => setShowSuccess(false)} />
