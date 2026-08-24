@@ -53,5 +53,6 @@ export function isValidStellarAddress(address: string): boolean {
   const checksum = decoded.slice(33);
   const expected = crc16Xmodem(payload);
 
-  return checksum[0] === (expected >> 8) && checksum[1] === (expected & 0xff);
+  // StrKey checksums are serialized little-endian.
+  return checksum[0] === (expected & 0xff) && checksum[1] === (expected >> 8);
 }

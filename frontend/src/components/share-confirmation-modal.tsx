@@ -17,6 +17,8 @@ interface ShareConfirmationModalProps {
   summary: ShareSummary | null;
   onConfirm: () => void;
   onCancel: () => void;
+  returnFocusTo?: HTMLElement | null;
+  postConfirmFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 const DURATION_LABELS: Record<number, string> = {
@@ -31,13 +33,20 @@ export function ShareConfirmationModal({
   summary,
   onConfirm,
   onCancel,
+  returnFocusTo,
+  postConfirmFocusRef,
 }: ShareConfirmationModalProps) {
   const { announceToScreenReader } = useAccessibility();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       announceToScreenReader('Share confirmation dialog opened');
+      // Remember the element that opened the dialog so we can restore focus
+      // when it closes. Fall back to the active element if no explicit opener
+      // was provided.
+      openerRef.current = returnFocusTo ?? (document.activeElement as HTMLElement | null);
       // Move focus into the dialog so keyboard/screen-reader users land inside.
       const focusable = dialogRef.current ? getFocusableElements(dialogRef.current) : [];
       if (focusable.length > 0) {
@@ -46,13 +55,39 @@ export function ShareConfirmationModal({
         dialogRef.current?.focus();
       }
     }
-  }, [isOpen, announceToScreenReader]);
+  }, [isOpen, announceToScreenReader, returnFocusTo]);
+
+  const focusOpenerOrFallback = useCallback(() => {
+    const opener = openerRef.current;
+    const isDisabled =
+      opener instanceof HTMLButtonElement || opener instanceof HTMLInputElement
+        ? opener.disabled
+        : false;
+    if (opener && 'focus' in opener && !isDisabled) {
+      opener.focus();
+    } else if (postConfirmFocusRef?.current) {
+      postConfirmFocusRef.current.focus();
+    }
+  }, [postConfirmFocusRef]);
+
+  const handleCancel = useCallback(() => {
+    const opener = openerRef.current;
+    if (opener && 'focus' in opener) {
+      opener.focus();
+    }
+    onCancel();
+  }, [onCancel]);
+
+  const handleConfirm = useCallback(() => {
+    focusOpenerOrFallback();
+    onConfirm();
+  }, [onConfirm, focusOpenerOrFallback]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onCancel();
+        handleCancel();
         return;
       }
       // Trap Tab and Shift+Tab within the dialog while it is open.
@@ -71,7 +106,7 @@ export function ShareConfirmationModal({
         }
       }
     },
-    [onCancel]
+    [handleCancel]
   );
 
   if (!summary) return null;
@@ -96,7 +131,7 @@ export function ShareConfirmationModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onCancel}
+            onClick={handleCancel}
           />
 
           {/* Modal content */}
@@ -154,13 +189,13 @@ export function ShareConfirmationModal({
             {/* Action buttons */}
             <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 sm:justify-end">
               <button
-                onClick={onCancel}
+                onClick={handleCancel}
                 className="px-4 py-3 sm:py-2 bg-white/10 hover:bg-white/20 active:bg-white/30 text-gray-300 rounded-lg transition-colors touch-manipulation order-2 sm:order-none"
               >
                 Cancel
               </button>
               <button
-                onClick={onConfirm}
+                onClick={handleConfirm}
                 className="px-4 py-3 sm:py-2 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white rounded-lg transition-colors flex items-center justify-center gap-2 touch-manipulation order-1 sm:order-none"
               >
                 <CheckCircle className="w-4 h-4" />

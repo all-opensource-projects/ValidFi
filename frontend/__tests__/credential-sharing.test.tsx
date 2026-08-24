@@ -7,7 +7,8 @@ function renderWithProviders(ui: React.ReactElement) {
   return render(<AccessibilityProvider>{ui}</AccessibilityProvider>);
 }
 
-const VALID_RECIPIENT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABZKY';
+// Checksum-valid Stellar ed25519 public key (version byte 0x30, CRC16-XModem, little-endian).
+const VALID_RECIPIENT = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 describe('CredentialSharing', () => {
   const walletAddress = 'GABCDEF123456...';
@@ -89,6 +90,18 @@ describe('CredentialSharing', () => {
     expect(
       screen.getByText('Enter a valid Stellar address (starts with G, 56 characters total)')
     ).toBeInTheDocument();
+  });
+
+  it('accepts a known checksum-valid Stellar public key', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+    const recipientInput = screen.getByLabelText('Recipient Wallet Address');
+
+    await user.type(recipientInput, VALID_RECIPIENT);
+
+    expect(
+      screen.queryByText('Enter a valid Stellar address (starts with G, 56 characters total)')
+    ).not.toBeInTheDocument();
   });
 
   it('opens the confirmation dialog when the form is valid', async () => {

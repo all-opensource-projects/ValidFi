@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { Share2, Lock, Clock, X, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AnimatedProgress, SuccessOverlay, SuccessToast } from './animations';
@@ -50,9 +50,12 @@ function isValidRecipient(address: string): boolean {
 
 // A share is expired once its expiry time passes, regardless of the stored
 // status. Derive the effective status so the list never shows stale "active".
-function effectiveStatus(share: { status: SharedCredential['status']; expiresAt: string }): SharedCredential['status'] {
+function effectiveStatus(
+  share: { status: SharedCredential['status']; expiresAt: string },
+  now: number
+): SharedCredential['status'] {
   if (share.status === 'revoked') return 'revoked';
-  if (Date.now() > new Date(share.expiresAt).getTime()) return 'expired';
+  if (now >= new Date(share.expiresAt).getTime()) return 'expired';
   return 'active';
 }
 
@@ -70,8 +73,28 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
   });
   const { announceToScreenReader } = useAccessibility();
   const shareButtonRef = useRef<HTMLButtonElement>(null);
+  const statusRegionRef = useRef<HTMLDivElement>(null);
 
   const { execute, error, clearError, isPending: isSharing } = useCredentialOperation();
+
+  // Re-render active shares exactly when the nearest non-revoked one expires.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const activeShares = sharedCredentials.filter((s) => s.status !== 'revoked');
+    if (activeShares.length === 0) return;
+
+    const nextExpiry = Math.min(
+      ...activeShares.map((s) => new Date(s.expiresAt).getTime())
+    );
+    const delay = nextExpiry - Date.now();
+    if (delay <= 0) {
+      setNow(Date.now());
+      return;
+    }
+
+    const timer = setTimeout(() => setNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [sharedCredentials]);
 
   const selectedCredentials = useMemo(
     () => AVAILABLE_CREDENTIALS.filter((credential) => selectedIds.includes(credential.id)),
@@ -331,7 +354,7 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
               </motion.div>
             ) : (
               sharedCredentials.map((share, index) => {
-                const status = effectiveStatus(share);
+                const status = effectiveStatus(share, now);
                 return (
                 <motion.div
                   key={share.id}
@@ -408,6 +431,17 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
         }
         onConfirm={handleConfirmShare}
         onCancel={() => setIsConfirmOpen(false)}
+        returnFocusTo={shareButtonRef.current}
+        postConfirmFocusRef={statusRegionRef}
+      />
+
+      {/* Status region: receives focus when the share button is disabled after confirmation. */}
+      <div
+        ref={statusRegionRef}
+        tabIndex={-1}
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
       />
 
       {/* Success overlay */}
