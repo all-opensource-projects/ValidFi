@@ -11,8 +11,8 @@ when `NODE_ENV=development`; every other environment (including an unset
 | --- | --- |
 | `src/config/database.config.ts` | Single source of truth for the connection options, shared by the Nest app and the CLI. |
 | `src/data-source.ts` | `DataSource` instance the TypeORM CLI loads (`-d src/data-source.ts`). |
-| `src/database/run-migrations.ts` | Applies pending migrations under a PostgreSQL advisory lock. |
-| `src/migrate.ts` | Standalone deploy entry point (`node dist/migrate.js`). |
+| `src/database/run-migrations.ts` | Run / revert / baseline, each under a PostgreSQL advisory lock. |
+| `src/migrate.ts` | Standalone deploy entry point (`node dist/migrate.js <command>`). |
 | `src/migrations/` | Generated migration files, applied in timestamp order. |
 
 `src/data-source.ts` loads `.env` itself, so CLI commands pick up the same
@@ -60,8 +60,7 @@ npm run migration:generate -- src/migrations/BaselineCheck
 
 # 2. If — and only if — step 1 reported no changes, mark migrations as applied
 #    without executing them.
-npm run migration:baseline          # from source
-npm run migration:baseline:prod     # from dist/, on a deployment host
+npm run migration:baseline:prod
 ```
 
 If step 1 *does* emit a migration, the live schema has drifted from the
@@ -73,33 +72,55 @@ Fresh databases need none of this — `migration:run` handles them.
 
 ## Production
 
-Two paths apply pending migrations, and both take the same advisory lock, so a
-deploy is safe either way:
+**Every schema change against a shared database must go through a `:prod`
+command or the application's own startup path.** Those are the only routes that
+take the advisory lock. The plain `migration:run` / `migration:revert` /
+`migration:baseline` scripts drive the TypeORM CLI directly, take no lock, and
+are meant for a developer's local database.
+
+| Command | Effect |
+| --- | --- |
+| `npm run migration:run:prod` | `node dist/migrate.js run` — apply pending migrations |
+| `npm run migration:revert:prod` | `node dist/migrate.js revert` — revert the last migration |
+| `npm run migration:baseline:prod` | `node dist/migrate.js baseline` — record migrations as applied without running them |
+| `npm run migration:show:prod` | List applied / pending migrations (read-only, no lock) |
+
+None of these need `ts-node`, so they work on a host installed with
+`npm install --production`.
+
+Two paths apply pending migrations on a deploy, and both take the same lock, so
+either order is safe:
 
 1. **On startup.** Whenever `NODE_ENV` is not `development`, `main.ts` calls
    `runPendingMigrations` before `app.listen()`, so the app never serves
    traffic against a stale schema.
 2. **From the deploy script.** `scripts/deploy-backend.sh` runs
-   `npm run migration:run:prod` after the build, which executes
-   `node dist/migrate.js` — no `ts-node`, so it works on a host installed with
-   `npm install --production`.
+   `npm run migration:run:prod` after the build.
 
 ### Why the advisory lock
 
 TypeORM decides which migrations are pending *before* recording them and takes
-no cross-process lock of its own. During a rolling deploy, or with more than
-one replica, two processes can therefore each conclude the same migration is
-pending and run its non-idempotent DDL twice. `runPendingMigrations` wraps the
-run in a PostgreSQL session-level advisory lock
-(`MIGRATION_ADVISORY_LOCK_KEY`): the second process blocks until the first
-commits, then finds nothing left to apply.
+no cross-process lock of its own. During a rolling deploy, with more than one
+replica, or when an operator runs a revert while an instance is booting, two
+processes can therefore each conclude the same migration is pending and run its
+non-idempotent DDL twice. `withMigrationLock` wraps every schema operation in a
+PostgreSQL session-level advisory lock (`MIGRATION_ADVISORY_LOCK_KEY`): the
+second process blocks until the first commits and releases, then re-reads the
+migrations table and finds the work already done.
+
+The lock is held on its own connection rather than the one TypeORM uses for the
+DDL. An advisory lock is a mutex between *sessions* and only has to be held for
+the duration of the work it guards; holding it on a dedicated session also
+keeps it alive across the several connections TypeORM opens and closes while
+migrating.
 
 This relies on a session-pooled connection. Behind a transaction-pooling proxy
 (PgBouncer in `transaction` mode), session-level advisory locks are not held
 across statements — point migrations at a direct connection there.
 
 `migrationsRun` is deliberately left `false` everywhere, because TypeORM's own
-bootstrap hook runs migrations before this lock can be taken.
+bootstrap hook runs migrations inside `DataSource.initialize()`, before this
+lock can be taken.
 
 ## Adding an entity
 
