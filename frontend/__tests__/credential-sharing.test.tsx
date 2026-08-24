@@ -1,10 +1,13 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { CredentialSharing } from '../src/components/credential-sharing';
 import { AccessibilityProvider } from '../src/contexts/AccessibilityContext';
 
 function renderWithProviders(ui: React.ReactElement) {
   return render(<AccessibilityProvider>{ui}</AccessibilityProvider>);
 }
+
+const VALID_RECIPIENT = 'G' + 'A'.repeat(55);
 
 describe('CredentialSharing', () => {
   const walletAddress = 'GABCDEF123456...';
@@ -17,7 +20,7 @@ describe('CredentialSharing', () => {
   it('renders share form elements', () => {
     renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
     expect(screen.getByText('Recipient Wallet Address')).toBeInTheDocument();
-    expect(screen.getByText('Select Vaccination Credential')).toBeInTheDocument();
+    expect(screen.getByText('Select Credentials to Share')).toBeInTheDocument();
     expect(screen.getByText('Proof Duration')).toBeInTheDocument();
   });
 
@@ -45,5 +48,48 @@ describe('CredentialSharing', () => {
   it('renders shared credentials section heading', () => {
     renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
     expect(screen.getByText('Shared Credentials')).toBeInTheDocument();
+  });
+
+  it('renders selectable credentials', () => {
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+    expect(screen.getByRole('checkbox', { name: 'Share COVID-19 (Pfizer)' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Share Influenza 2025' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Share Hepatitis B' })).toBeInTheDocument();
+  });
+
+  it('keeps share button disabled until recipient and credential are valid', () => {
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+    const shareButton = screen.getAllByText('Share Vaccination Proof').find(
+      (el) => el.tagName === 'BUTTON'
+    ) as HTMLButtonElement;
+    expect(shareButton).toBeDisabled();
+  });
+
+  it('shows validation error for an invalid recipient address', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+    const recipientInput = screen.getByLabelText('Recipient Wallet Address');
+
+    await user.type(recipientInput, 'not-a-stellar-address');
+
+    expect(
+      screen.getByText('Enter a valid Stellar address (starts with G, 56 characters total)')
+    ).toBeInTheDocument();
+  });
+
+  it('opens the confirmation dialog when the form is valid', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+
+    await user.type(screen.getByLabelText('Recipient Wallet Address'), VALID_RECIPIENT);
+    await user.click(screen.getByRole('checkbox', { name: 'Share COVID-19 (Pfizer)' }));
+
+    const shareButton = screen.getAllByText('Share Vaccination Proof').find(
+      (el) => el.tagName === 'BUTTON'
+    ) as HTMLButtonElement;
+    await user.click(shareButton);
+
+    expect(screen.getByRole('button', { name: 'Confirm Share' })).toBeInTheDocument();
+    expect(screen.getByText(VALID_RECIPIENT)).toBeInTheDocument();
   });
 });
