@@ -127,10 +127,11 @@ describe('CredentialSharing', () => {
       jest.spyOn(Math, 'random').mockReturnValue(0.5);
       // jsdom does not ship crypto.randomUUID.
       if (!global.crypto?.randomUUID) {
-        Object.defineProperty(global.crypto, 'randomUUID', {
-          value: () => `test-id-${Math.random()}`,
-          configurable: true,
-        });
+      let idCounter = 0;
+      Object.defineProperty(global.crypto, 'randomUUID', {
+        value: () => `test-id-${++idCounter}`,
+        configurable: true,
+      });
       }
     });
 
