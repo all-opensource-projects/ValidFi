@@ -77,24 +77,21 @@ export function CredentialSharing({ walletAddress }: CredentialSharingProps) {
 
   const { execute, error, clearError, isPending: isSharing } = useCredentialOperation();
 
-  // Re-render active shares exactly when the nearest non-revoked one expires.
+  // Re-render active shares exactly when the nearest not-yet-expired one
+  // expires. Depending on `now` reschedules after every expiry transition.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const activeShares = sharedCredentials.filter((s) => s.status !== 'revoked');
-    if (activeShares.length === 0) return;
+    const nextExpiry = sharedCredentials
+      .filter((s) => s.status !== 'revoked')
+      .map((s) => new Date(s.expiresAt).getTime())
+      .filter((expiry) => expiry > now)
+      .sort((a, b) => a - b)[0];
 
-    const nextExpiry = Math.min(
-      ...activeShares.map((s) => new Date(s.expiresAt).getTime())
-    );
-    const delay = nextExpiry - Date.now();
-    if (delay <= 0) {
-      setNow(Date.now());
-      return;
-    }
+    if (nextExpiry === undefined) return;
 
-    const timer = setTimeout(() => setNow(Date.now()), delay);
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, nextExpiry - Date.now()));
     return () => clearTimeout(timer);
-  }, [sharedCredentials]);
+  }, [sharedCredentials, now]);
 
   const selectedCredentials = useMemo(
     () => AVAILABLE_CREDENTIALS.filter((credential) => selectedIds.includes(credential.id)),

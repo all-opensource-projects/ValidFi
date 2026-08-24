@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CredentialSharing } from '../src/components/credential-sharing';
 import { AccessibilityProvider } from '../src/contexts/AccessibilityContext';
@@ -118,5 +118,80 @@ describe('CredentialSharing', () => {
 
     expect(screen.getByRole('button', { name: 'Confirm Share' })).toBeInTheDocument();
     expect(screen.getByText(VALID_RECIPIENT)).toBeInTheDocument();
+  });
+
+  describe('expiry transitions', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      // Keep the simulated 10% network failure out of the test.
+      jest.spyOn(Math, 'random').mockReturnValue(0.5);
+      // jsdom does not ship crypto.randomUUID.
+      if (!global.crypto?.randomUUID) {
+        Object.defineProperty(global.crypto, 'randomUUID', {
+          value: () => `test-id-${Math.random()}`,
+          configurable: true,
+        });
+      }
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+      jest.useRealTimers();
+    });
+
+    async function shareOne(user: ReturnType<typeof userEvent.setup>, credentialLabel: string) {
+      await user.type(screen.getByLabelText('Recipient Wallet Address'), VALID_RECIPIENT);
+      await user.click(screen.getByRole('checkbox', { name: `Share ${credentialLabel}` }));
+
+      const shareButton = screen.getAllByText('Share Vaccination Proof').find(
+        (el) => el.tagName === 'BUTTON'
+      ) as HTMLButtonElement;
+      await user.click(shareButton);
+      await user.click(screen.getByRole('button', { name: 'Confirm Share' }));
+
+      // Let the simulated proof generation finish, then reset the form so the
+      // next share can be created cleanly.
+      await act(async () => {
+        jest.advanceTimersByTime(3000);
+      });
+      await user.clear(screen.getByLabelText('Recipient Wallet Address'));
+      await user.click(screen.getByRole('checkbox', { name: `Share ${credentialLabel}` }));
+    }
+
+    it(
+      'flips each share to expired at its own expiry time without user interaction',
+      async () => {
+        const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+
+        renderWithProviders(<CredentialSharing walletAddress={walletAddress} />);
+
+        // First share: 1 hour.
+        await user.selectOptions(screen.getByLabelText('Proof Duration'), '3600');
+        await shareOne(user, 'COVID-19 (Pfizer)');
+
+        // Second share: 1 day.
+        await user.selectOptions(screen.getByLabelText('Proof Duration'), '86400');
+        await shareOne(user, 'Influenza 2025');
+
+        expect(screen.getAllByText('Active')).toHaveLength(2);
+
+        // Advance past the first expiry only — the hourly share flips to
+        // expired while the daily one stays active.
+        await act(async () => {
+          jest.advanceTimersByTime(3600 * 1000 + 1);
+        });
+        const badges = screen.getAllByText(/^(Active|Expired)$/);
+        expect(badges.filter((el) => el.textContent === 'Expired')).toHaveLength(1);
+        expect(badges.filter((el) => el.textContent === 'Active')).toHaveLength(1);
+
+        // Advance past the second expiry — everything is expired now.
+        await act(async () => {
+          jest.advanceTimersByTime(86400 * 1000);
+        });
+        expect(screen.queryByText('Active')).not.toBeInTheDocument();
+        expect(screen.getAllByText('Expired')).toHaveLength(2);
+      },
+      15000
+    );
   });
 });
